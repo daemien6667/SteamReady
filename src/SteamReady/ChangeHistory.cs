@@ -183,6 +183,6 @@ internal sealed class ChangeHistory(string dataRoot, Func<bool> steamRunning)
         }
         try { if (batch.Entries.Count > 0) Prune(); }
         catch (Exception ex) { errors.Add("History retention: " + ex.Message); }
-        return new(changed, errors);
+        return new(changed, errors, batch.Entries.Where(e => e.State == "applied").ToList());
     }
 }

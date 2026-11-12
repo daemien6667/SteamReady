@@ -121,6 +121,46 @@ try
     Check(retained.List().Count == 50, "Oldest completed batches pruned to 50");
     Check(Directory.GetDirectories(Path.Combine(root, "retention-data", "history")).Length == 50, "Pruning removes owned backup directories");
 
+    // Preferences use isolated local state; scans below are simulated snapshots.
+    var prefs = new PreferenceStore(Path.Combine(root, "preference-data"));
+    Game PGame(string id, string mode, string? location = null) =>
+        new(Path.Combine(location ?? main, "steamapps", $"appmanifest_{id}.acf"), id, "Game " + id, location ?? main, mode);
+    ScanResult PScan(params Game[] games) => new(main, [main, other], games.ToList(), []);
+    Check(prefs.Observe(PScan(PGame("123", "2"))).Notices.Count == 0, "First scan establishes baseline without treating existing game as new");
+    Check(prefs.Load().Games["123"].Preferred == "2", "Baseline remembers current preference");
+    var incomplete = PScan() with { Warnings = ["Drive unavailable"] };
+    Check(!prefs.Observe(incomplete).Complete && prefs.Load().Games["123"].Installed, "Incomplete scan does not invent uninstall");
+    Check(!prefs.Observe(PScan(PGame("123", "2"), PGame("123", "0", other))).Complete, "Duplicate app ID scan is not trusted");
+    prefs.Observe(PScan());
+    Check(!prefs.Load().Games["123"].Installed && prefs.Load().Games["123"].Preferred == "2", "Uninstall retains saved preference");
+    var reinstalled = PScan(PGame("123", "0", other));
+    var reinstallNotice = prefs.Observe(reinstalled).Notices.Single();
+    Check(reinstallNotice.Kind == "reinstall" && !reinstallNotice.RequiresConfirmation, "Reinstall detected by app ID on different drive; automatic restore default");
+    var restarted = new PreferenceStore(Path.Combine(root, "preference-data"));
+    Check(restarted.Observe(reinstalled, askOnReinstall: true).Notices.Single().RequiresConfirmation, "Pending reinstall survives restart and supports ask mode");
+    Check(restarted.PlanSavedPreference(reinstalled, "123")?.Desired == "2", "Restore plan targets saved mode on new drive");
+    Reject<InvalidOperationException>(() => restarted.PlanSavedPreference(PScan(PGame("123", "1", other)), "123"), "Reject stale restore plan");
+    restarted.RememberApplied([new HistoryEntry("fixture", "123", "Game 123", "0", "2", "", "applied")]);
+    Check(restarted.Observe(PScan(PGame("123", "2", other))).Notices.Count == 0, "Verified write clears pending without creating false manual exception");
+    restarted.Observe(PScan(PGame("123", "1", other)));
+    Check(restarted.Load().Games["123"] is { Preferred: "1", Exception: true }, "Default respects manual change as exception");
+    var ask = restarted.Observe(PScan(PGame("123", "0", other)), askOnManualChange: true).Notices.Single();
+    Check(ask.Kind == "manual" && ask.RequiresConfirmation && ask.Preferred == "1", "Ask mode preserves previous preference");
+    Check(restarted.PlanSavedPreference(PScan(PGame("123", "0", other)), "123")?.Desired == "1", "Manual conflict can be restored");
+    restarted.KeepObserved("123");
+    Check(restarted.Load().Games["123"] is { Preferred: "0", Exception: true, Pending: null }, "Keep manual change resolves pending");
+    var newGame = restarted.Observe(PScan(PGame("123", "0", other), PGame("456", "1"))).Notices.Single();
+    Check(newGame.Kind == "new" && newGame.Id == "456", "New game recognized after baseline");
+    restarted.KeepObserved("456");
+    Reject<InvalidOperationException>(() => restarted.Forget("456"), "Cannot forget installed game");
+    restarted.Observe(PScan(PGame("123", "0", other)));
+    restarted.Forget("456");
+    Check(!restarted.Load().Games.ContainsKey("456"), "Forget uninstalled game");
+    Check(restarted.Observe(PScan(PGame("123", "0", other), PGame("456", "2"))).Notices.Single().Kind == "new", "Forgotten game treated as new");
+    restarted.RememberApplied([new HistoryEntry("fixture", "123", "Game 123", "0", "2", "", "failed")]);
+    Check(restarted.Load().Games["123"].Preferred == "0", "Failed writes do not change saved preference");
+    Check(result.Applied?.Single().Id == "123" && partialWrite.Applied?.Count == 1, "History returns only verified successes for preference integration");
+
 }
 finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
 Console.WriteLine($"All {passed} fixture checks passed. No real Steam libraries accessed.");

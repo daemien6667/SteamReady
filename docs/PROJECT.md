@@ -73,9 +73,19 @@ This setting is independent of automatic new-game detection. No automatic writes
 Owner authorized development to proceed after completing the functionality discussion. UI design remains on hold; implement approved functionality incrementally without redesigning the interface or publishing a public release.
 
 
-## Checkpoint 0.2 — history engine (implementation, CI pending)
+## Checkpoint 0.2 — history engine (compiled and fixture-tested)
 - Added `ChangeHistory` backend with durable pre-write intents, byte-exact backups, per-entry results and timestamps, configurable retention (default 50 completed batches; pending and legacy records are preserved), whole-batch and selected-app restoration, and restoration as a new batch.
 - Existing Apply and Undo last batch actions now use the new backend. Existing layout and appearance are unchanged. The history browser, selection and retention controls are deferred to the separate UI phase; the backend APIs are available for integration.
 - Older preview undo journal remains readable; old raw backups are never pruned by the new engine. Restoration checks current scanned path/app identity and expected preference; conflicting or moved/unavailable apps are skipped with errors.
 - Added isolated write tests, backup/BOM verification, selective restore, preservation of unrelated changes, undo of restoration, stale/conflicting modes, partial failures, simulated Steam restart, and retention.
-- Remaining: verify CI and owner regression test; test crash/power-loss recovery and access-denied handling; build saved preferences/groups/profiles, import/export, automatic monitoring/queue and startup, graceful Steam shutdown/relaunch with explicit consent, and update notification. No public release or UI design authorized.
+- [Windows CI run](https://github.com/daemien6667/SteamReady/actions/runs/43325406399) completed successfully: compile, fixture tests, portable publish and artifact upload. Owner regression test remains outstanding;
+- Remaining: test crash/power-loss recovery and access-denied handling; build saved preferences/groups/profiles, import/export, automatic monitoring/queue and startup, graceful Steam shutdown/relaunch with explicit consent, and update notification. No public release or UI design authorized.
+
+
+## Checkpoint 0.3 — persistent preferences backend (implementation, CI pending)
+- Versioned local JSON store keyed by Steam app ID, not library path. Verified Apply/Undo writes now record successful preferences; failed writes never update the saved target. A preference persistence failure is reported without claiming the Steam write failed.
+- Observation API establishes a baseline, detects new apps and missing/reinstalled apps, preserves preferences across uninstall, recognizes manual preference changes and supports default respect-as-exception or ask behavior. Pending observations persist across restart; reinstall planning defaults to automatic restoration eligibility, with optional confirmation.
+- Incomplete scans, unreadable manifests, disconnected drives and duplicate app IDs cannot trigger uninstall/reinstall decisions. Scan observation is intentionally conservative and does not write Steam manifests. Forget is restricted to uninstalled apps.
+- Restoration plans require a fresh complete scan and unchanged observed preference. No automatic writes occur in this checkpoint. The monitoring/queue layer will call observation and execute approved plans later; existing UI layout and code remain unchanged.
+- Added fixtures for baseline, partial scans, duplicate IDs, reinstall on different drive, persistence, pending decisions, manual exceptions, stale plans, new games, forgetting and verified-write integration.
+- Next: groups/profiles and explicit preference precedence; then import/export, monitoring/queue, shutdown/relaunch, startup and update notification. UI redesign and public release remain deferred.

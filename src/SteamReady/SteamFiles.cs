@@ -57,7 +57,7 @@ internal sealed record Game(string Path, string Id, string Name, string Library,
 internal sealed record ScanResult(string Root, List<string> Libraries, List<Game> Games, List<string> Warnings);
 internal sealed record BackupEntry(string Path, string Id, string Before, string After, string Backup);
 internal sealed record Batch(List<BackupEntry> Entries);
-internal sealed record ChangeResult(int Changed, List<string> Errors);
+internal sealed record ChangeResult(int Changed, List<string> Errors, List<HistoryEntry>? Applied = null);
 
 internal static class SteamFiles
 {
@@ -176,6 +176,12 @@ internal static class SteamFiles
         }
         finally { if (File.Exists(temp)) File.Delete(temp); }
     }
-    public static ChangeResult Apply(IEnumerable<Game> selected, string desired) => History.Apply(selected, desired);
-    public static ChangeResult Undo(ScanResult scan) => History.UndoLatest(scan);
+    private static ChangeResult Remember(ChangeResult result)
+    {
+        try { new PreferenceStore(Data).RememberApplied(result.Applied ?? []); }
+        catch (Exception ex) { result.Errors.Add("Game preferences could not be saved: " + ex.Message); }
+        return result;
+    }
+    public static ChangeResult Apply(IEnumerable<Game> selected, string desired) => Remember(History.Apply(selected, desired));
+    public static ChangeResult Undo(ScanResult scan) => Remember(History.UndoLatest(scan));
 }
