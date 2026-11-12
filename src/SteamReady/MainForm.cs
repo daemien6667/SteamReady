@@ -7,6 +7,18 @@ internal sealed class MainForm : Form
     private readonly ComboBox mode = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 240 };
     private readonly Button apply = new() { Text = "Apply to selected", AutoSize = true };
     private readonly Button undo = new() { Text = "Undo last batch", AutoSize = true };
+    private readonly Button checkUpdates = new() { Text = "Check for updates", AutoSize = true };
+    private readonly Button installUpdate = new() { Text = "Download & Install Update", AutoSize = true, Visible = false };
+    private readonly Button skipUpdate = new() { Text = "Skip this version", AutoSize = true, Visible = false };
+    private readonly CheckBox autoUpdates = new() { Text = "Check automatically", AutoSize = true };
+    private readonly UpdateSettingsStore updateSettings = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamReady"));
+    private readonly HttpClient updateHttp = new() { Timeout = TimeSpan.FromMinutes(2) };
+    private SteamReadyRelease? availableUpdate;
+    private bool checkingUpdates;
+    private bool updateExitRequested;
+    internal event Action? UpdateInstallReady;
+    internal event Action<string>? UpdateAvailable;
+    internal bool UpdateExitRequested => updateExitRequested;
     private ScanResult? scan;
     private string? root;
     internal string? SteamRoot => root;
@@ -38,7 +50,7 @@ internal sealed class MainForm : Form
         var rescan = new Button { Text = "Scan / refresh", AutoSize = true };
         var all = new Button { Text = "Select all", AutoSize = true };
         var none = new Button { Text = "Clear selection", AutoSize = true };
-        top.Controls.AddRange(new Control[] { browse, rescan, all, none });
+        top.Controls.AddRange(new Control[] { browse, rescan, all, none, checkUpdates, installUpdate, skipUpdate, autoUpdates });
         var bottom = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, Padding = new Padding(8), WrapContents = true };
         bottom.Controls.AddRange(new Control[] { mode, apply, undo });
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
@@ -50,7 +62,7 @@ internal sealed class MainForm : Form
         layout.Controls.Add(top, 0, 0); layout.Controls.Add(list, 0, 1);
         layout.Controls.Add(status, 0, 2); layout.Controls.Add(bottom, 0, 3);
         Controls.Add(layout);
-        foreach (var b in new[] { browse, rescan, all, none, apply, undo })
+        foreach (var b in new[] { browse, rescan, all, none, apply, undo, checkUpdates, installUpdate, skipUpdate })
         {
             b.FlatStyle = FlatStyle.Flat; b.BackColor = Color.FromArgb(58, 83, 109); b.ForeColor = Color.White;
         }
@@ -61,8 +73,86 @@ internal sealed class MainForm : Form
         list.ItemChecked += (_, _) => UpdateButtons();
         apply.Click += (_, _) => RunManual(Apply);
         undo.Click += (_, _) => RunManual(Undo);
+        try { autoUpdates.Checked = updateSettings.Load().AutomaticChecks; } catch { autoUpdates.Checked = false; }
+        autoUpdates.CheckedChanged += (_, _) =>
+        {
+            try { updateSettings.Save(updateSettings.Load() with { AutomaticChecks = autoUpdates.Checked }); }
+            catch (Exception ex) { MessageBox.Show(ex.Message, "Update settings"); }
+        };
+        checkUpdates.Click += async (_, _) => await CheckUpdatesAsync(true);
+        installUpdate.Click += async (_, _) => await InstallUpdateAsync();
+        skipUpdate.Click += (_, _) =>
+        {
+            if (availableUpdate == null) return;
+            try
+            {
+                updateSettings.Save(updateSettings.Load() with { SkippedVersion = availableUpdate.Tag });
+                SetUpdate(null);
+            }
+            catch (Exception ex) { MessageBox.Show(ex.Message, "Update settings"); }
+        };
+        FormClosing += (_, e) =>
+        {
+            if (OperationActive && !updateExitRequested && e.CloseReason == CloseReason.UserClosing) e.Cancel = true;
+        };
+        FormClosed += (_, _) => updateHttp.Dispose();
         Shown += (_, _) => RunManual(RefreshList);
         UpdateButtons();
+    }
+    private void SetUpdate(SteamReadyRelease? release)
+    {
+        availableUpdate = release;
+        installUpdate.Visible = skipUpdate.Visible = release != null;
+        if (release != null) installUpdate.Text = "Download & Install " + release.Tag;
+    }
+    internal async Task CheckUpdatesAsync(bool manual)
+    {
+        if (checkingUpdates || OperationActive || IsDisposed) return;
+        checkingUpdates = true;
+        try
+        {
+            var settings = updateSettings.Load();
+            if (!manual && !UpdateService.IsDue(settings, DateTimeOffset.UtcNow)) return;
+            // Save the attempt before networking so repeated failures never spam GitHub.
+            updateSettings.Save(settings with { LastAttemptUtc = DateTimeOffset.UtcNow });
+            var release = await new UpdateService(updateHttp).CheckAsync(UpdateService.CurrentVersion);
+            if (IsDisposed) return;
+            if (!manual && release?.Tag == settings.SkippedVersion) release = null;
+            SetUpdate(release);
+            if (release != null)
+            {
+                UpdateAvailable?.Invoke(release.Tag);
+                if (manual) MessageBox.Show(this, "SteamReady " + release.Tag + " is available.\n\n" + release.Notes, "Release notes");
+            }
+            else if (manual) MessageBox.Show(this, "No newer installable release is available.", "SteamReady updates");
+        }
+        catch (Exception ex) { if (manual && !IsDisposed) MessageBox.Show(this, ex.Message, "Update check failed"); }
+        finally { checkingUpdates = false; }
+    }
+    private async Task InstallUpdateAsync()
+    {
+        if (OperationActive || checkingUpdates || availableUpdate == null) return;
+        var release = availableUpdate;
+        if (MessageBox.Show(this, "Install SteamReady " + release.Tag + "? SteamReady will close and reopen. Your settings and Steam games will not be changed.\n\n" + release.Notes,
+            "Install update", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+        OperationActive = true;
+        installUpdate.Enabled = false;
+        checkUpdates.Enabled = false;
+        skipUpdate.Enabled = false;
+        try
+        {
+            status.Text = "Downloading and verifying SteamReady " + release.Tag + "...";
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+            await new UpdateService(updateHttp).StageAndStartAsync(release, Environment.ProcessPath!, timeout.Token);
+            updateExitRequested = true;
+            UpdateInstallReady?.Invoke();
+        }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "Update installation failed"); }
+        finally
+        {
+            OperationActive = false;
+            if (!IsDisposed) { installUpdate.Enabled = checkUpdates.Enabled = skipUpdate.Enabled = true; if (!updateExitRequested) RefreshList(); }
+        }
     }
     private static string Display(string value) => value switch { "2" => "Immediate", "1" => "On launch", _ => "Steam default" };
     private string Target => mode.SelectedIndex switch { 0 => "2", 1 => "0", _ => "1" };

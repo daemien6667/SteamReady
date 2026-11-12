@@ -320,6 +320,36 @@ try
     Check(queue.Tick().Status == "queue-paused" && File.ReadAllText(qGame.Path) == Manifest("123", "1"), "Changing apply mode pauses queued work");
     queue.Cancel(pausedBatch.Id);
 
+    var updates = new UpdateSettingsStore(Path.Combine(root, "update-data"));
+    Check(updates.Load().AutomaticChecks && UpdateService.IsDue(updates.Load(), DateTimeOffset.UtcNow), "Automatic update checks enabled by default");
+    var now = DateTimeOffset.UtcNow;
+    updates.Save(new(LastAttemptUtc: now, SkippedVersion: "v1.2.3"));
+    Check(!UpdateService.IsDue(updates.Load(), now.AddHours(23)) && UpdateService.IsDue(updates.Load(), now.AddHours(24)), "Automatic checks at most daily");
+    Check(!UpdateService.IsDue(updates.Load() with { AutomaticChecks = false }, now.AddDays(2)), "Automatic checks can be disabled");
+    string releaseJson = """
+    {"tag_name":"v1.2.3","draft":false,"prerelease":false,"body":"Fixture notes","assets":[
+    {"name":"SteamReady.exe","browser_download_url":"https://github.com/daemien6667/SteamReady/releases/download/v1.2.3/SteamReady.exe"},
+    {"name":"SHA256SUMS.txt","browser_download_url":"https://github.com/daemien6667/SteamReady/releases/download/v1.2.3/SHA256SUMS.txt"}]}
+    """;
+    var release = UpdateService.ParseRelease(releaseJson, new Version(1, 2, 2));
+    Check(release?.Version == new Version(1, 2, 3) && release.Notes == "Fixture notes", "Newer compatible official release detected");
+    Check(UpdateService.ParseRelease(releaseJson, new Version(1, 2, 3)) == null, "Equal release not offered");
+    Check(UpdateService.ParseRelease(releaseJson, new Version(2, 0, 0)) == null, "Downgrade not offered");
+    Check(UpdateService.ParseRelease(releaseJson.Replace("\"prerelease\":false", "\"prerelease\":true"), new Version(1, 0, 0)) == null, "Prerelease ignored");
+    Check(UpdateService.ParseRelease(releaseJson.Replace("\"draft\":false", "\"draft\":true"), new Version(1, 0, 0)) == null, "Draft ignored");
+    Check(UpdateService.ParseRelease(releaseJson.Replace("\"name\":\"SHA256SUMS.txt\"", "\"name\":\"other.txt\""), new Version(1, 0, 0)) == null, "Missing checksum prevents install offer");
+    Reject<FormatException>(() => UpdateService.ParseRelease(releaseJson.Replace("https://github.com/", "https://example.com/"), new Version(1, 0, 0)), "Untrusted release asset rejected");
+    string binary = Path.Combine(root, "fake-update.exe");
+    File.WriteAllBytes(binary, [77, 90, 1, 2, 3]);
+    string digest = UpdateService.FileHash(binary);
+    Check(UpdateService.ParseChecksum(digest + "  SteamReady.exe\n") == digest, "SHA256SUMS format accepted");
+    Reject<FormatException>(() => UpdateService.ParseChecksum(digest + "  other.exe"), "Wrong checksum filename rejected");
+    UpdateService.Verify(binary, digest);
+    Check(true, "Verified fixture executable accepted");
+    File.AppendAllText(binary, "changed");
+    Reject<IOException>(() => UpdateService.Verify(binary, digest), "Corrupted executable rejected");
+    Check(updates.Load().SkippedVersion == "v1.2.3", "Skipped version persisted");
+
 }
 finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
 Console.WriteLine($"All {passed} fixture checks passed. No real Steam libraries accessed.");

@@ -20,6 +20,7 @@ internal sealed class RuntimeHost : ApplicationContext
         settings = new(dataRoot);
         management = new(dataRoot);
         form = new MainForm();
+        form.UpdateInstallReady += ExitApplication;
         controller = new(dataRoot, SteamFiles.SteamRunning, () =>
         {
             string root = form.SteamRoot ?? SteamFiles.FindSteam() ?? throw new InvalidOperationException("Steam not detected.");
@@ -29,6 +30,10 @@ internal sealed class RuntimeHost : ApplicationContext
         menu.Items.Add("Open SteamReady", null, (_, _) => OpenWindow());
         menu.Items.Add("Exit SteamReady", null, (_, _) => ExitApplication());
         tray = new NotifyIcon { Icon = SystemIcons.Application, Text = "SteamReady", ContextMenuStrip = menu };
+        form.UpdateAvailable += version =>
+        {
+            if (tray.Visible) tray.ShowBalloonTip(5000, "SteamReady", "Version " + version + " is available. Open SteamReady to install.", ToolTipIcon.Info);
+        };
         tray.DoubleClick += (_, _) => OpenWindow();
         tray.BalloonTipClicked += (_, _) => OpenWindow();
         form.FormClosing += (_, e) =>
@@ -41,7 +46,7 @@ internal sealed class RuntimeHost : ApplicationContext
             }
         };
         form.FormClosed += (_, _) => ExitThread();
-        timer.Tick += (_, _) => Poll();
+        timer.Tick += async (_, _) => { Poll(); await form.CheckUpdatesAsync(false); };
         var initial = ReadSettings();
         bool hide = RuntimeSettingsStore.HideOnStartup(initial, startupLaunch);
         tray.Visible = initial.BackgroundMode || hide;
@@ -63,6 +68,7 @@ internal sealed class RuntimeHost : ApplicationContext
     }
     private void ExitApplication()
     {
+        if (form.OperationActive && !form.UpdateExitRequested) return;
         explicitExit = true;
         form.Close();
         // A hidden form that never created a window may not raise FormClosed.
