@@ -44,7 +44,7 @@ Status: APPROVED DESIGN only. These decisions are not implementation or public-r
 | # | Decision | Approved direction |
 |---|---|---|
 | 1 | Automatic management scope | User-selectable new games only (default when automatic management is enabled) or continuous enforcement across installed games, subject to individual exceptions. Background operation remains optional. |
-| 2 | Individual exceptions | Respect preferences deliberately changed within Steam; optionally remember those changes as exceptions. |
+| 2 | Individual exceptions | User-selectable: (A, default) respect deliberate changes made within Steam and automatically remember them as exceptions; (B) notify the user and ask whether to keep the new preference or restore the SteamReady preference. Applies independently of automatic management scope. |
 | 3 | Uninstall/reinstall | Remember preferences by Steam app ID across uninstall and reinstall. |
 | 4 | Backup retention | Keep the last 50 change batches by default, with an option to retain more. Multi-batch recovery is planned; current build supports only last-batch undo. |
 | 5 | Game profiles | User-defined groups with customizable names and update preferences. |
