@@ -4,7 +4,7 @@ namespace SteamReady;
 // Local, app-ID-keyed preferences. Observation never edits Steam manifests.
 // Pending decisions persist until explicitly resolved or a verified write succeeds.
 internal sealed record SavedGame(string Id, string Name, string Preferred, string Observed, bool Installed,
-    bool Exception, string? Pending, string? ProfileTarget = null);
+    bool Exception, string? Pending);
 internal sealed record PreferenceSnapshot(int Version, bool BaselineEstablished, Dictionary<string, SavedGame> Games);
 internal sealed record PreferenceNotice(string Id, string Name, string Kind, string Observed, string Preferred, bool RequiresConfirmation);
 internal sealed record PreferenceObservation(bool Complete, List<PreferenceNotice> Notices);
@@ -20,7 +20,7 @@ internal sealed class PreferenceStore(string dataRoot)
         foreach (var (id, g) in state.Games)
         {
             if (g == null || !ValidId(id) || id != g.Id || g.Name == null || !ValidMode(g.Preferred) ||
-                !ValidMode(g.Observed) || (g.ProfileTarget != null && !ValidMode(g.ProfileTarget)) || g.Pending is not (null or "reinstall" or "manual" or "new"))
+                !ValidMode(g.Observed) || g.Pending is not (null or "reinstall" or "manual" or "new"))
                 throw new FormatException("Invalid saved game preference: " + id);
         }
     }
@@ -74,29 +74,29 @@ internal sealed class PreferenceStore(string dataRoot)
             }
             var next = old with { Name = g.Name, Installed = true, Observed = g.Mode };
             if (!old.Installed)
-                next = next with { Pending = g.Mode == (old.ProfileTarget ?? old.Preferred) ? null : "reinstall" };
+                next = next with { Pending = g.Mode == old.Preferred ? null : "reinstall" };
             else if (old.Pending == "reinstall")
             {
-                if (g.Mode == (old.ProfileTarget ?? old.Preferred)) next = next with { Pending = null };
+                if (g.Mode == old.Preferred) next = next with { Pending = null };
                 else if (g.Mode != old.Observed)
                     next = next with { Pending = "manual" }; // changed again before restore: require a decision
             }
             else if (old.Pending == "manual")
             {
-                if (g.Mode == (old.ProfileTarget ?? old.Preferred)) next = next with { Pending = null };
+                if (g.Mode == old.Preferred) next = next with { Pending = null };
             }
             else if (g.Mode != old.Observed)
             {
-                if (g.Mode == (old.ProfileTarget ?? old.Preferred)) next = next with { Pending = null };
+                if (g.Mode == old.Preferred) next = next with { Pending = null };
                 else if (askOnManualChange) next = next with { Pending = "manual" };
-                else next = next with { Preferred = g.Mode, Exception = true, Pending = null, ProfileTarget = null };
+                else next = next with { Preferred = g.Mode, Exception = true, Pending = null };
             }
             records[g.Id] = next;
         }
         Save(state with { BaselineEstablished = true });
         return new(true, records.Values.Where(g => g.Installed && g.Pending != null)
             .OrderBy(g => g.Id, StringComparer.Ordinal)
-            .Select(g => new PreferenceNotice(g.Id, g.Name, g.Pending!, g.Observed, g.ProfileTarget ?? g.Preferred,
+            .Select(g => new PreferenceNotice(g.Id, g.Name, g.Pending!, g.Observed, g.Preferred,
                 g.Pending == "manual" || (g.Pending == "reinstall" && askOnReinstall))).ToList());
     }
     // The caller supplies verified history outcomes only, never a requested target
@@ -113,36 +113,12 @@ internal sealed class PreferenceStore(string dataRoot)
         }
         Save(state);
     }
-    public void RememberProfileApplied(IEnumerable<HistoryEntry> entries)
-    {
-        var applied = entries.Where(e => e.State == "applied").ToArray();
-        if (applied.Length == 0) return;
-        var state = Load();
-        foreach (var e in applied)
-        {
-            state.Games.TryGetValue(e.Id, out var old);
-            state.Games[e.Id] = new(e.Id, e.Name, old?.Preferred ?? e.Before, e.After,
-                true, old?.Exception ?? false, null, e.After);
-        }
-        Save(state);
-    }
-    public void RememberProfileTargets(IEnumerable<ProfileDecision> decisions)
-    {
-        var state = Load();
-        foreach (var d in decisions.Where(d => !d.Blocked))
-        {
-            state.Games.TryGetValue(d.Game.Id, out var old);
-            state.Games[d.Game.Id] = new(d.Game.Id, d.Game.Name, old?.Preferred ?? d.Game.Mode, d.Desired,
-                true, old?.Exception ?? false, null, d.Desired);
-        }
-        Save(state);
-    }
     public void KeepObserved(string id)
     {
         var state = Load();
         if (!state.Games.TryGetValue(id, out var game) || !game.Installed || game.Pending == null)
             throw new InvalidOperationException("No pending preference decision.");
-        state.Games[id] = game with { Preferred = game.Observed, Exception = game.Exception || game.Pending == "manual", Pending = null, ProfileTarget = null };
+        state.Games[id] = game with { Preferred = game.Observed, Exception = game.Exception || game.Pending == "manual", Pending = null };
         Save(state);
     }
     public void Forget(string id)
@@ -164,7 +140,6 @@ internal sealed class PreferenceStore(string dataRoot)
         var game = freshScan.Games.SingleOrDefault(g => g.Id == id)
             ?? throw new InvalidOperationException("Game no longer installed.");
         if (game.Mode != saved.Observed) throw new InvalidOperationException("Preference changed; observe again.");
-        string target = saved.ProfileTarget ?? saved.Preferred;
-        return game.Mode == target ? null : new(game, target);
+        return game.Mode == saved.Preferred ? null : new(game, saved.Preferred);
     }
 }
