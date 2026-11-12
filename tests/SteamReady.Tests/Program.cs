@@ -224,6 +224,69 @@ try
     Reject<FormatException>(() => config.Save(config.Load() with { ApplyBehaviour = "invalid" }), "Invalid management settings rejected");
     Check(new ChangeHistory(autoData, () => false).List().All(b => b.Kind == "management"), "Automatic operations use recoverable history batches");
 
+    // Controller uses a fake client; no real Steam process is launched or stopped.
+    var simulated = new FakeSteamClient { State = SteamClientState.Idle };
+    var controller = new SteamOperationController(simulated, _ => Task.CompletedTask, 3);
+    int permissionCalls = 0, writeCalls = 0;
+    ChangeResult FixtureApply() { writeCalls++; return new(1, []); }
+    var denied = await controller.RunAsync(() => { permissionCalls++; return false; }, FixtureApply);
+    Check(denied.Status == "declined" && permissionCalls == 1 && writeCalls == 0 && simulated.ShutdownCalls == 0, "No consent means no shutdown or writes");
+    var allowed = await controller.RunAsync(() => { permissionCalls++; return true; }, FixtureApply);
+    Check(allowed.Status == "applied" && allowed.Relaunched && permissionCalls == 2 && writeCalls == 1 && simulated.ShutdownCalls == 1 && simulated.LaunchCalls == 1, "Yes shuts down, applies and relaunches");
+    var again = await controller.RunAsync(() => { permissionCalls++; return false; }, FixtureApply);
+    Check(again.Status == "declined" && permissionCalls == 3 && simulated.ShutdownCalls == 1, "Consent never remembered");
+    simulated.State = SteamClientState.Busy;
+    Check((await controller.RunAsync(() => true, FixtureApply)).Status == "manual-required" && writeCalls == 1, "Running game blocks shutdown");
+    simulated.State = SteamClientState.Unknown;
+    Check((await controller.RunAsync(() => true, FixtureApply)).Status == "manual-required", "Unknown state blocks shutdown");
+    simulated.State = SteamClientState.Closed;
+    var closed = await controller.RunAsync(() => throw new Exception("Unexpected consent"), FixtureApply);
+    Check(closed.Status == "applied" && !closed.Relaunched && writeCalls == 2 && simulated.LaunchCalls == 1, "Already closed applies without shutdown consent or relaunch");
+    simulated.State = SteamClientState.Idle;
+    simulated.ExitOnShutdown = false;
+    var timeout = await controller.RunAsync(() => true, FixtureApply);
+    Check(timeout.Status == "timeout" && writeCalls == 2 && simulated.LaunchCalls == 1, "Timeout never writes or relaunches");
+    simulated.ExitOnShutdown = true;
+    var changedState = await controller.RunAsync(() => { simulated.State = SteamClientState.Busy; return true; }, FixtureApply);
+    Check(changedState.Status == "manual-required" && writeCalls == 2, "Recheck after consent blocks newly running game");
+    simulated.State = SteamClientState.Idle;
+    var failedWrite = await controller.RunAsync(() => true, () => throw new IOException("Fixture write error"));
+    Check(failedWrite.Status == "apply-error" && failedWrite.Relaunched && simulated.LaunchCalls == 2, "Apply error reported and originally running client reopened");
+    simulated.State = SteamClientState.Idle;
+    var externalRestart = await controller.RunAsync(() => true, () => { simulated.State = SteamClientState.Idle; return new(0, ["Steam restarted"]); });
+    Check(externalRestart.Status == "partial-or-error" && !externalRestart.Relaunched && simulated.LaunchCalls == 2, "External restart does not launch duplicate");
+    simulated.State = SteamClientState.Idle;
+    simulated.FailLaunch = true;
+    var failedLaunch = await controller.RunAsync(() => true, FixtureApply);
+    Check(failedLaunch.Status == "relaunch-error" && failedLaunch.Result?.Changed == 1 && !failedLaunch.Relaunched, "Launch failure preserves verified apply result");
+    simulated.FailLaunch = false;
+    simulated.State = SteamClientState.Closed;
+    Check(controller.LaunchSteam().Status == "launched" && controller.LaunchSteam().Status == "already-running", "Standalone launch avoids duplicate");
+    simulated.State = SteamClientState.Idle;
+    var independent = await controller.RunAsync(() => { simulated.State = SteamClientState.Closed; return true; }, FixtureApply);
+    Check(independent.Status == "applied" && !independent.Relaunched, "Independent user exit not automatically reopened");
+
 }
 finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
 Console.WriteLine($"All {passed} fixture checks passed. No real Steam libraries accessed.");
+
+internal sealed class FakeSteamClient : ISteamClient
+{
+    public SteamClientState State { get; set; }
+    public int ShutdownCalls { get; private set; }
+    public int LaunchCalls { get; private set; }
+    public bool ExitOnShutdown { get; set; } = true;
+    public bool FailLaunch { get; set; }
+    public SteamClientState Probe() => State;
+    public void RequestShutdown()
+    {
+        ShutdownCalls++;
+        if (ExitOnShutdown) State = SteamClientState.Closed;
+    }
+    public void Launch()
+    {
+        if (FailLaunch) throw new IOException("Fixture launch error");
+        LaunchCalls++;
+        State = SteamClientState.Idle;
+    }
+}
