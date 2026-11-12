@@ -80,7 +80,7 @@ internal sealed class HistoryDialog : Form
     {
         this.records = records;
         Text = "Change history"; StartPosition = FormStartPosition.CenterParent; ClientSize = new Size(750, 450);
-        var split = new SplitContainer { Dock = DockStyle.Fill, SplitterDistance = 280 };
+        var split = new SplitContainer { Dock = DockStyle.Fill, Size = new Size(750, 400), SplitterDistance = 280 };
         split.Panel1.Controls.Add(batches); split.Panel2.Controls.Add(games);
         var actions = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true };
         var restore = new Button { Text = "Restore checked games", AutoSize = true };
@@ -107,6 +107,7 @@ internal sealed class HistoryDialog : Form
     }
     private sealed record EntryChoice(HistoryEntry Entry)
     {
-        public override string ToString() => $"{Entry.Name} [{Entry.Id}]  {Entry.Before} → {Entry.After} ({Entry.State})";
+        private static string Mode(string value) => value switch { "2" => "Immediate", "1" => "On launch", _ => "Let Steam decide" };
+        public override string ToString() => $"{Entry.Name} [{Entry.Id}]  {Mode(Entry.Before)} → {Mode(Entry.After)} ({Entry.State})";
     }
 }

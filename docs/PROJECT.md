@@ -133,14 +133,14 @@ Owner agreed the simple three-choice workflow makes migration easy without expor
 - Next: update checker; then functional integration and expert UI phase, owner regression tests, release approval.
 
 
-## Checkpoint 0.9 — update checker and opt-in portable installer (implementation; CI pending)
+## Checkpoint 0.9 — update checker and opt-in portable installer (compiled and fixture-tested)
 - Windows CI for 0.8 passed: https://github.com/daemien6667/SteamReady/actions/runs/43332657235.
 - Stable GitHub latest-release metadata, strict numeric version comparison, exact repository asset URLs, HTTPS response-host validation, bounded downloads, SHA256SUMS.txt verification, and no offer for same/older versions or missing assets. Automatic check attempt persisted at most once daily, configurable; manual check and skip version.
 - Minimal functional controls added to existing top bar: Check for updates, Check automatically, Download & Install version and Skip (the latter two only visible when a newer compatible release is found). Manual check/install displays release notes; install requires explicit confirmation. Background checks can signal tray notification. No visual redesign.
 - User-initiated installer stages verified executable beside current portable file, copies current executable as helper, waits for single-instance mutex, rechecks original and staged hashes, replaces executable with previous.exe recovery copy, and starts updated executable. Attempts rollback if process launch fails; no unattended install, no elevation, no changes to Steam or local preferences. Writable portable directory required. Local helper/recovery folder remains for manual recovery; launch success is not proof updated app is healthy.
 - Release contract: stable tag vMAJOR.MINOR.PATCH matching assembly version, raw SteamReady.exe and SHA256SUMS.txt attached to official GitHub release. Existing CI artifacts are not public releases. No release created. SHA-256 detects corruption, not independent publisher authentication; signed release binaries and live update/recovery validation are recommended before release.
 - Tests cover version gates, asset validation, missing assets, checksums, settings and daily throttle. Actual network download, process replacement, relaunch, rollback and tray behavior need isolated Windows end-to-end testing with a real release or controlled fixture. No automatic or public release authorized.
-- Next: functional integration (Apply shutdown consent, queue and management controls, history browser, filtering), expert-led UI design and owner regression tests.
+- [Windows CI](https://github.com/daemien6667/SteamReady/actions/runs/43333039220) passed compile, fixtures and portable publish. Next: functional integration (Apply shutdown consent, queue and management controls, history browser, filtering), expert-led UI design and owner regression tests.
 
 
 ## Checkpoint 1.0-alpha — functional integration (implementation; CI pending)
@@ -149,3 +149,5 @@ Owner agreed the simple three-choice workflow makes migration easy without expor
 - Settings explicitly control startup registry, automatic-write permission and tray operation. Polling is paused during modal/explicit operations. Existing layout style is retained, with development controls added; not final UI design.
 - Baseline observation now runs on manual scans even with automation disabled; verified writes and restores retain existing history/preferences safeguards.
 - Remaining: CI compile/fixture run; real Windows end-to-end owner testing for all functional controls, including live Steam shutdown/relaunch, startup/tray, pending notifications, and updater replacement. Settings writes span separate files/registry and are not transactional. No release created. UI expert to refine controls, messaging and layout after functional validation.
+
+- Integration follow-up: history splitter initialized with valid size; history labels use friendly preference names. Pending confirmation and queue-review notifications surface in the foreground status and tray if present, even when optional informational notifications are off.

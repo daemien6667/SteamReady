@@ -88,11 +88,14 @@ internal sealed class RuntimeHost : ApplicationContext
             var result = controller.Tick();
             // The current window never silently resets the user's checked selection.
             // Stale selections are rejected by the existing writer; refresh is manual.
-            if (!config.Notifications || !tray.Visible) return;
+            bool requiredNotice = result.Status is "queue-ready" or "queue-review" or "queue-paused" ||
+                (result.Review is { SteamRunning: false } r && r.Candidates.Any(c => c.RequiresConfirmation || r.Settings.ApplyBehaviour == "notify"));
+            if (!config.Notifications && !requiredNotice) return;
             string? notice = result.Status switch
             {
                 "queue-ready" => "Queued changes are ready for confirmation.",
                 "queue-review" => result.Detail ?? "Queued changes need review.",
+                "queue-paused" => result.Detail ?? "Queued changes paused.",
                 "queue-applied" => "Queued game preferences applied.",
                 "managed" => $"{result.Result?.Changed ?? 0} game preference(s) updated.",
                 "error" => result.Detail,
@@ -102,7 +105,8 @@ internal sealed class RuntimeHost : ApplicationContext
             };
             if (notice != null && notice != lastNotice)
             {
-                tray.ShowBalloonTip(5000, "SteamReady", notice, ToolTipIcon.Info);
+                form.ShowRuntimeNotice(notice);
+                if (tray.Visible) tray.ShowBalloonTip(5000, "SteamReady", notice, ToolTipIcon.Info);
             }
             lastNotice = notice;
         }

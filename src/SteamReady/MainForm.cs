@@ -24,6 +24,7 @@ internal sealed class MainForm : Form
     private readonly HashSet<string> checkedPaths = new(StringComparer.OrdinalIgnoreCase);
     private bool rebuilding;
     internal event Action? RuntimeSettingsChanged;
+    internal void ShowRuntimeNotice(string notice) { if (!OperationActive && !IsDisposed) status.Text = notice; }
     private BackgroundController Queue => new(Data, SteamFiles.SteamRunning, FreshScan);
     private ScanResult FreshScan() => SteamFiles.Scan(root ?? throw new InvalidOperationException("Choose Steam folder first."));
     private ScanResult? scan;
