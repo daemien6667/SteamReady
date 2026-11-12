@@ -9,6 +9,14 @@ internal sealed class MainForm : Form
     private readonly Button undo = new() { Text = "Undo last batch", AutoSize = true };
     private ScanResult? scan;
     private string? root;
+    internal string? SteamRoot => root;
+    internal bool OperationActive { get; private set; }
+    private void RunManual(Action action)
+    {
+        if (OperationActive) return;
+        OperationActive = true;
+        try { action(); } finally { OperationActive = false; }
+    }
     public MainForm()
     {
         Text = "SteamReady | Development preview";
@@ -46,14 +54,14 @@ internal sealed class MainForm : Form
         {
             b.FlatStyle = FlatStyle.Flat; b.BackColor = Color.FromArgb(58, 83, 109); b.ForeColor = Color.White;
         }
-        browse.Click += (_, _) => { using var picker = new FolderBrowserDialog(); if (picker.ShowDialog() == DialogResult.OK) { root = picker.SelectedPath; RefreshList(); } };
-        rescan.Click += (_, _) => RefreshList();
+        browse.Click += (_, _) => RunManual(() => { using var picker = new FolderBrowserDialog(); if (picker.ShowDialog() == DialogResult.OK) { root = picker.SelectedPath; RefreshList(); } });
+        rescan.Click += (_, _) => RunManual(RefreshList);
         all.Click += (_, _) => { foreach (ListViewItem item in list.Items) item.Checked = true; };
         none.Click += (_, _) => { foreach (ListViewItem item in list.Items) item.Checked = false; };
         list.ItemChecked += (_, _) => UpdateButtons();
-        apply.Click += (_, _) => Apply();
-        undo.Click += (_, _) => Undo();
-        Shown += (_, _) => RefreshList();
+        apply.Click += (_, _) => RunManual(Apply);
+        undo.Click += (_, _) => RunManual(Undo);
+        Shown += (_, _) => RunManual(RefreshList);
         UpdateButtons();
     }
     private static string Display(string value) => value switch { "2" => "Immediate", "1" => "On launch", _ => "Steam default" };

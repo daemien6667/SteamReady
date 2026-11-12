@@ -11,5 +11,6 @@
     <Compile Include="../../src/SteamReady/PreferenceStore.cs" Link="PreferenceStore.cs" />
     <Compile Include="../../src/SteamReady/AutomaticManager.cs" Link="AutomaticManager.cs" />
     <Compile Include="../../src/SteamReady/SteamOperationController.cs" Link="SteamOperationController.cs" />
+    <Compile Include="../../src/SteamReady/BackgroundController.cs" Link="BackgroundController.cs" />
   </ItemGroup>
 </Project>

@@ -106,6 +106,14 @@ internal sealed class ChangeHistory(string dataRoot, Func<bool> steamRunning)
             throw new ArgumentException("Invalid or duplicate planned change.");
         return Execute(items, "management", null, []);
     }
+    public ChangeResult ApplyQueued(IEnumerable<PlannedChange> plan)
+    {
+        var items = plan.ToArray();
+        if (items.Any(p => p.Desired is not ("0" or "1" or "2")) ||
+            items.GroupBy(p => p.Game.Path, StringComparer.OrdinalIgnoreCase).Any(g => g.Count() > 1))
+            throw new ArgumentException("Invalid or duplicate queued change.");
+        return Execute(items, "queued", null, []);
+    }
     public ChangeResult UndoLatest(ScanResult scan)
     {
         var latest = List().FirstOrDefault(b => b.Entries.Any(Restorable));

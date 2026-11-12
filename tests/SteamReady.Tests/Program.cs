@@ -266,6 +266,60 @@ try
     var independent = await controller.RunAsync(() => { simulated.State = SteamClientState.Closed; return true; }, FixtureApply);
     Check(independent.Status == "applied" && !independent.Relaunched, "Independent user exit not automatically reopened");
 
+    string runtimeData = Path.Combine(root, "runtime-data");
+    var runtime = new RuntimeSettingsStore(runtimeData);
+    Check(runtime.Load() is { BackgroundMode: false, StartWithWindows: false, StartMinimized: true }, "Runtime defaults off; startup minimized preference on");
+    Check(!RuntimeSettingsStore.HideOnClose(runtime.Load(), false, true), "Default window closes normally");
+    runtime.Save(new(BackgroundMode: true, StartWithWindows: true));
+    Check(new RuntimeSettingsStore(runtimeData).Load().BackgroundMode, "Runtime settings persist");
+    Check(RuntimeSettingsStore.HideOnClose(runtime.Load(), false, true) &&
+        !RuntimeSettingsStore.HideOnClose(runtime.Load(), true, true) &&
+        !RuntimeSettingsStore.HideOnClose(runtime.Load(), false, false), "Tray close policy honors exit and system shutdown");
+    Check(RuntimeSettingsStore.HideOnStartup(runtime.Load(), true) && !RuntimeSettingsStore.HideOnStartup(runtime.Load(), false), "Only startup launch hides window");
+    string startupExe = Path.Combine(root, "Space folder", "SteamReady.exe");
+    Check(WindowsStartup.Command(startupExe) == "\"" + startupExe + "\" --startup", "Startup command safely quotes executable");
+    Reject<ArgumentException>(() => WindowsStartup.Command("relative.exe"), "Reject relative startup path");
+
+    string queueData = Path.Combine(root, "queue-data");
+    var qSettings = new ManagementSettingsStore(queueData);
+    bool queueSteam = true;
+    var queue = new BackgroundController(queueData, () => queueSteam, () => SteamFiles.Scan(autoRoot));
+    var qScan = SteamFiles.Scan(autoRoot);
+    var qGame = qScan.Games.Single(g => g.Id == "123");
+    Reject<InvalidOperationException>(() => queue.Enqueue(qScan, [qGame], "2"), "Manual mode does not queue explicit changes");
+    qSettings.Save(new(ApplyBehaviour: "auto"));
+    var batchQueued = queue.Enqueue(qScan, [qGame], "2");
+    Check(queue.Tick().Status == "waiting-for-steam", "Explicit queue waits for normal Steam exit");
+    Reject<InvalidOperationException>(() => queue.Enqueue(qScan, [qGame], "0"), "Existing queue not silently replaced");
+    queueSteam = false;
+    var resumedQueue = new BackgroundController(queueData, () => queueSteam, () => SteamFiles.Scan(autoRoot));
+    Check(resumedQueue.Pending?.Id == batchQueued.Id, "Explicit batch survives restart");
+    var appliedQueue = resumedQueue.Tick();
+    Check(appliedQueue.Status == "queue-applied" && appliedQueue.Result?.Changed == 1 && resumedQueue.Pending == null, "Explicit queue applies even with automatic management disabled");
+    Check(new PreferenceStore(queueData).Load().Games["123"].Exception, "Queued explicit selection preserved as exception");
+    Check(new ChangeHistory(queueData, () => false).List().Single().Kind == "queued", "Queued operation backed up");
+    qSettings.Save(new(ApplyBehaviour: "notify"));
+    qScan = SteamFiles.Scan(autoRoot);
+    qGame = qScan.Games.Single(g => g.Id == "123");
+    var notifyBatch = queue.Enqueue(qScan, [qGame], "0");
+    Check(queue.Tick().Status == "queue-ready" && File.ReadAllText(qGame.Path) == Manifest("123", "2"), "Notify queue never writes without confirmation");
+    Check(queue.ApplyConfirmed(notifyBatch.Id).Status == "queue-applied", "Explicit notify confirmation applies");
+    qSettings.Save(new(ApplyBehaviour: "auto"));
+    qScan = SteamFiles.Scan(autoRoot);
+    qGame = qScan.Games.Single(g => g.Id == "123");
+    var staleBatch = queue.Enqueue(qScan, [qGame], "2");
+    File.WriteAllText(qGame.Path, Manifest("123", "1"));
+    Check(queue.Tick().Status == "queue-review" && queue.Pending?.NeedsReview == true && File.ReadAllText(qGame.Path) == Manifest("123", "1"), "Stale queued selection blocked without overwrite");
+    Check(queue.Tick().Status == "queue-review", "Failed queue never blindly replays");
+    queue.Cancel(staleBatch.Id);
+    Check(queue.Pending == null, "Queue cancellation clears pending work");
+    qScan = SteamFiles.Scan(autoRoot);
+    qGame = qScan.Games.Single(g => g.Id == "123");
+    var pausedBatch = queue.Enqueue(qScan, [qGame], "2");
+    qSettings.Save(new(ApplyBehaviour: "manual"));
+    Check(queue.Tick().Status == "queue-paused" && File.ReadAllText(qGame.Path) == Manifest("123", "1"), "Changing apply mode pauses queued work");
+    queue.Cancel(pausedBatch.Id);
+
 }
 finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
 Console.WriteLine($"All {passed} fixture checks passed. No real Steam libraries accessed.");
