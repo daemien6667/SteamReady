@@ -101,7 +101,7 @@ internal sealed class PreferenceStore(string dataRoot)
     }
     // The caller supplies verified history outcomes only, never a requested target
     // for a failed or unverified write. Explicit changes also supersede pending work.
-    public void RememberApplied(IEnumerable<HistoryEntry> entries)
+    public void RememberApplied(IEnumerable<HistoryEntry> entries, bool explicitChoice = false)
     {
         var applied = entries.Where(e => e.State == "applied").ToArray();
         if (applied.Length == 0) return;
@@ -109,7 +109,7 @@ internal sealed class PreferenceStore(string dataRoot)
         foreach (var e in applied)
         {
             state.Games.TryGetValue(e.Id, out var old);
-            state.Games[e.Id] = new(e.Id, e.Name, e.After, e.After, true, old?.Exception ?? false, null);
+            state.Games[e.Id] = new(e.Id, e.Name, e.After, e.After, true, explicitChoice || (old?.Exception ?? false), null);
         }
         Save(state);
     }
@@ -119,6 +119,14 @@ internal sealed class PreferenceStore(string dataRoot)
         if (!state.Games.TryGetValue(id, out var game) || !game.Installed || game.Pending == null)
             throw new InvalidOperationException("No pending preference decision.");
         state.Games[id] = game with { Preferred = game.Observed, Exception = game.Exception || game.Pending == "manual", Pending = null };
+        Save(state);
+    }
+    public void KeepAsException(string id, string expectedObserved)
+    {
+        var state = Load();
+        if (!state.Games.TryGetValue(id, out var game) || !game.Installed || game.Observed != expectedObserved)
+            throw new InvalidOperationException("Observed preference changed; rescan.");
+        state.Games[id] = game with { Preferred = game.Observed, Exception = true, Pending = null };
         Save(state);
     }
     public void Forget(string id)

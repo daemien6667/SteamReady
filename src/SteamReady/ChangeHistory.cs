@@ -98,6 +98,14 @@ internal sealed class ChangeHistory(string dataRoot, Func<bool> steamRunning)
         if (desired is not ("0" or "1" or "2")) throw new ArgumentException("Invalid target.");
         return Execute(selected.Where(g => g.Mode != desired).Select(g => new PlannedChange(g, desired)), "apply", null, []);
     }
+    public ChangeResult ApplyManagement(IEnumerable<PlannedChange> plan)
+    {
+        var items = plan.ToArray();
+        if (items.Any(p => p.Desired is not ("0" or "1" or "2")) ||
+            items.GroupBy(p => p.Game.Path, StringComparer.OrdinalIgnoreCase).Any(g => g.Count() > 1))
+            throw new ArgumentException("Invalid or duplicate planned change.");
+        return Execute(items, "management", null, []);
+    }
     public ChangeResult UndoLatest(ScanResult scan)
     {
         var latest = List().FirstOrDefault(b => b.Entries.Any(Restorable));

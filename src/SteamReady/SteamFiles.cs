@@ -178,7 +178,7 @@ internal static class SteamFiles
     }
     private static ChangeResult Remember(ChangeResult result)
     {
-        try { new PreferenceStore(Data).RememberApplied(result.Applied ?? []); }
+        try { new PreferenceStore(Data).RememberApplied(result.Applied ?? [], explicitChoice: true); }
         catch (Exception ex) { result.Errors.Add("Game preferences could not be saved: " + ex.Message); }
         return result;
     }

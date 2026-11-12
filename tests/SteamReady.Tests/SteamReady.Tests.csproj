@@ -9,5 +9,6 @@
     <Compile Include="../../src/SteamReady/SteamFiles.cs" Link="SteamFiles.cs" />
     <Compile Include="../../src/SteamReady/ChangeHistory.cs" Link="ChangeHistory.cs" />
     <Compile Include="../../src/SteamReady/PreferenceStore.cs" Link="PreferenceStore.cs" />
+    <Compile Include="../../src/SteamReady/AutomaticManager.cs" Link="AutomaticManager.cs" />
   </ItemGroup>
 </Project>
