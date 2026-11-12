@@ -89,3 +89,12 @@ Owner authorized development to proceed after completing the functionality discu
 - Restoration plans require a fresh complete scan and unchanged observed preference. No automatic writes occur in this checkpoint. The monitoring/queue layer will call observation and execute approved plans later; existing UI layout and code remain unchanged.
 - Added fixtures for baseline, partial scans, duplicate IDs, reinstall on different drive, persistence, pending decisions, manual exceptions, stale plans, new games, forgetting and verified-write integration.
 - Next: groups/profiles and explicit preference precedence; then import/export, monitoring/queue, shutdown/relaunch, startup and update notification. UI redesign and public release remain deferred.
+
+
+## Checkpoint 0.4 — groups and profiles backend (implementation, CI pending)
+- Versioned JSON profile catalog; custom names, multiple memberships, ordered group priority, group defaults, per-profile overrides and optional ungrouped default. Highest priority matching group wins; explicit individual exceptions take precedence. No artificial group/profile limit.
+- Create, edit via validated catalog save, duplicate, reorder and delete; group removal cleans profile overrides. Active profile deletion is blocked until switching away.
+- Preview lists every installed app, current/target mode, reason and conflicts. Incomplete/ambiguous scans and unresolved external changes prevent unsafe switching. Confirmed application requires an unchanged fresh preview, uses the existing journal/backup writer, and records a profile batch.
+- Preserve individual base preference separately from effective profile target, so temporary modes do not destroy original settings. Successful profile writes update observed/effective values; full successful switch marks active profile. Partial failures are reported; active profile is not changed. Profile application is backend-only, with no automatic shutdown or background execution. Profile-aware history undo/automatic reconciliation and UI controls remain to be integrated.
+- Added tests for overlapping groups, priority changes, profile defaults/overrides, duplication, invalid configuration, exception precedence, stale preview, actual fixture application, history and switching back to distinct individual modes.
+- No change to MainForm or visual design. Next: selective export/import.

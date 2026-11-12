@@ -161,6 +161,74 @@ try
     Check(restarted.Load().Games["123"].Preferred == "0", "Failed writes do not change saved preference");
     Check(result.Applied?.Single().Id == "123" && partialWrite.Applied?.Count == 1, "History returns only verified successes for preference integration");
 
+    // Group/profile state is isolated from earlier fixtures.
+    var profileData = Path.Combine(root, "profile-data");
+    var profiles = new ProfileStore(profileData);
+    var profilePrefs = new PreferenceStore(profileData);
+    var profileScan = PScan(PGame("123", "0"), PGame("456", "1"), PGame("789", "0"), PGame("999", "2"));
+    profilePrefs.Observe(profileScan);
+    var favorites = profiles.CreateGroup("Favorites", "2", ["123", "456"]);
+    var large = profiles.CreateGroup("Large games", "1", ["123", "789"]);
+    var normal = profiles.CreateProfile("Normal", null, new());
+    var vacation = profiles.CreateProfile("Vacation", "1", new() { [favorites.Id] = "1", [large.Id] = "0" });
+    var preview = profiles.Preview(normal.Id, profileScan, profilePrefs.Load());
+    Check(preview.Decisions.Single(d => d.Game.Id == "123").Desired == "2", "Overlapping groups use explicit first-group priority");
+    Check(preview.Decisions.Single(d => d.Game.Id == "789").Desired == "1", "Group default applies when not overridden");
+    Check(preview.Decisions.Single(d => d.Game.Id == "999").Desired == "2", "Ungrouped game retains saved preference");
+    profiles.SetGroupPriority([large.Id, favorites.Id]);
+    Check(profiles.Preview(normal.Id, profileScan, profilePrefs.Load()).Decisions.Single(d => d.Game.Id == "123").Desired == "1", "Priority can be reordered");
+    Reject<ArgumentException>(() => profiles.SetGroupPriority([large.Id, large.Id]), "Reject duplicate priority");
+    var away = profiles.Preview(vacation.Id, profileScan, profilePrefs.Load());
+    Check(away.Decisions.Single(d => d.Game.Id == "123").Desired == "0" && away.Decisions.Single(d => d.Game.Id == "999").Desired == "1", "Profile overrides group and ungrouped defaults");
+    var copy = profiles.DuplicateProfile(vacation.Id, "Vacation copy");
+    Check(copy.Id != vacation.Id && copy.GroupModes[large.Id] == "0", "Duplicate creates independent profile");
+    var catalog = profiles.Load();
+    catalog.Profiles.Single(p => p.Id == copy.Id).GroupModes[large.Id] = "2";
+    profiles.Save(catalog);
+    Check(new ProfileStore(profileData).Load().Profiles.Single(p => p.Id == vacation.Id).GroupModes[large.Id] == "0", "Duplicate independent and catalog persisted");
+    Reject<FormatException>(() => profiles.CreateGroup("favorites", "2", []), "Duplicate group name rejected");
+    Reject<FormatException>(() => profiles.CreateProfile("Bad mode", "9", new()), "Invalid profile mode rejected");
+    Check(profiles.Load().Profiles.Count == 3, "Rejected edits preserve catalog");
+    var manuallyChanged = PScan(PGame("123", "2"), PGame("456", "1"), PGame("789", "0"), PGame("999", "2"));
+    Check(profiles.Preview(vacation.Id, manuallyChanged, profilePrefs.Load()).Decisions.Single(d => d.Game.Id == "123").Blocked, "Unobserved external change blocks profile");
+    profilePrefs.Observe(manuallyChanged);
+    Check(profiles.Preview(vacation.Id, manuallyChanged, profilePrefs.Load()).Decisions.Single(d => d.Game.Id == "123") is { Desired: "2", Reason: "Individual exception" }, "Individual exception wins over group and profile");
+    Reject<InvalidOperationException>(() => profiles.Preview(normal.Id, incomplete, profilePrefs.Load()), "Incomplete scan blocks profile");
+    profiles.DeleteGroup(large.Id);
+    Check(profiles.Load().Profiles.All(p => !p.GroupModes.ContainsKey(large.Id)), "Deleting group removes dangling overrides");
+    profiles.DeleteProfile(copy.Id);
+    Check(profiles.Load().Profiles.Count == 2, "Delete inactive profile");
+
+    // Real writes remain confined to temporary fixture manifests.
+    string profileRoot = Path.Combine(root, "profile-steam");
+    Directory.CreateDirectory(Path.Combine(profileRoot, "steamapps"));
+    File.WriteAllText(Path.Combine(profileRoot, "steam.exe"), "Fixture only");
+    File.WriteAllText(Path.Combine(profileRoot, "steamapps", "libraryfolders.vdf"), "\"libraryfolders\" {}");
+    string papp = Path.Combine(profileRoot, "steamapps", "appmanifest_123.acf");
+    string papp2 = Path.Combine(profileRoot, "steamapps", "appmanifest_456.acf");
+    File.WriteAllText(papp, Manifest("123", "0"));
+    File.WriteAllText(papp2, Manifest("456", "2"));
+    var liveData = Path.Combine(root, "profile-live-data");
+    var livePrefs = new PreferenceStore(liveData);
+    var liveProfiles = new ProfileStore(liveData);
+    var liveHistory = new ChangeHistory(liveData, () => false);
+    var liveScan = SteamFiles.Scan(profileRoot);
+    livePrefs.Observe(liveScan);
+    var normalProfile = liveProfiles.CreateProfile("Normal", null, new());
+    var awayProfile = liveProfiles.CreateProfile("Away", "1", new());
+    var approved = liveProfiles.Preview(awayProfile.Id, liveScan, livePrefs.Load());
+    Check(approved.Changes.Count == 2 && File.ReadAllText(papp) == Manifest("123", "0"), "Preview never writes manifest");
+    Reject<InvalidOperationException>(() => liveProfiles.ApplyConfirmed(approved, PScan(PGame("123", "2")), livePrefs, liveHistory), "Stale preview rejected");
+    var profileResult = liveProfiles.ApplyConfirmed(approved, SteamFiles.Scan(profileRoot), livePrefs, liveHistory);
+    Check(profileResult.Changed == 2 && profileResult.Errors.Count == 0 && liveProfiles.Load().ActiveProfileId == awayProfile.Id, "Confirmed profile applies and activates");
+    Check(liveHistory.List().Single().Kind == "profile" && liveHistory.List().Single().Entries.Count == 2, "Profile switch uses normal backup history");
+    Check(livePrefs.Load().Games["123"] is { Preferred: "0", Observed: "1", ProfileTarget: "1" }, "Temporary profile keeps original individual preference");
+    Check(livePrefs.Observe(SteamFiles.Scan(profileRoot)).Notices.Count == 0 && !livePrefs.Load().Games["123"].Exception, "Verified profile write does not create exception");
+    var back = liveProfiles.Preview(normalProfile.Id, SteamFiles.Scan(profileRoot), livePrefs.Load());
+    Check(liveProfiles.ApplyConfirmed(back, SteamFiles.Scan(profileRoot), livePrefs, liveHistory).Changed == 2, "Switching back restores distinct base preferences");
+    Check(File.ReadAllText(papp) == Manifest("123", "0") && File.ReadAllText(papp2) == Manifest("456", "2"), "Original modes restored");
+    Reject<InvalidOperationException>(() => liveProfiles.DeleteProfile(normalProfile.Id), "Cannot delete active profile");
+
 }
 finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
 Console.WriteLine($"All {passed} fixture checks passed. No real Steam libraries accessed.");
