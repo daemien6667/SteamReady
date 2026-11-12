@@ -184,4 +184,5 @@ internal static class SteamFiles
     }
     public static ChangeResult Apply(IEnumerable<Game> selected, string desired) => Remember(History.Apply(selected, desired));
     public static ChangeResult Undo(ScanResult scan) => Remember(History.UndoLatest(scan));
+    public static ChangeResult Restore(ScanResult scan, string batch, IReadOnlySet<string> ids) => Remember(History.Restore(scan, batch, ids));
 }

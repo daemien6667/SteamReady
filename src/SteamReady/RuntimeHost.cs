@@ -21,6 +21,7 @@ internal sealed class RuntimeHost : ApplicationContext
         management = new(dataRoot);
         form = new MainForm();
         form.UpdateInstallReady += ExitApplication;
+        form.RuntimeSettingsChanged += () => { tray.Visible = ReadSettings().BackgroundMode || !form.Visible; };
         controller = new(dataRoot, SteamFiles.SteamRunning, () =>
         {
             string root = form.SteamRoot ?? SteamFiles.FindSteam() ?? throw new InvalidOperationException("Steam not detected.");
@@ -38,6 +39,7 @@ internal sealed class RuntimeHost : ApplicationContext
         tray.BalloonTipClicked += (_, _) => OpenWindow();
         form.FormClosing += (_, e) =>
         {
+            if (form.OperationActive && !form.UpdateExitRequested && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; return; }
             if (RuntimeSettingsStore.HideOnClose(ReadSettings(), explicitExit, e.CloseReason == CloseReason.UserClosing))
             {
                 e.Cancel = true;

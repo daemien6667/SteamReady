@@ -141,3 +141,11 @@ Owner agreed the simple three-choice workflow makes migration easy without expor
 - Release contract: stable tag vMAJOR.MINOR.PATCH matching assembly version, raw SteamReady.exe and SHA256SUMS.txt attached to official GitHub release. Existing CI artifacts are not public releases. No release created. SHA-256 detects corruption, not independent publisher authentication; signed release binaries and live update/recovery validation are recommended before release.
 - Tests cover version gates, asset validation, missing assets, checksums, settings and daily throttle. Actual network download, process replacement, relaunch, rollback and tray behavior need isolated Windows end-to-end testing with a real release or controlled fixture. No automatic or public release authorized.
 - Next: functional integration (Apply shutdown consent, queue and management controls, history browser, filtering), expert-led UI design and owner regression tests.
+
+
+## Checkpoint 1.0-alpha — functional integration (implementation; CI pending)
+- Connected the existing Apply and Undo actions plus historical restore to the consent-gated Steam controller. Added Launch Steam, explicit queue action, review/cancel pending changes, automatic management decisions, saved games and forget uninstalled app, and settings dialog for runtime/management/retention.
+- Added current-mode filtering and mixed-selection dropdown placeholder; select all/clear apply to visible games only, and Apply only targets checked visible games. No mixed value can be written. Refresh preserves selections where possible.
+- Settings explicitly control startup registry, automatic-write permission and tray operation. Polling is paused during modal/explicit operations. Existing layout style is retained, with development controls added; not final UI design.
+- Baseline observation now runs on manual scans even with automation disabled; verified writes and restores retain existing history/preferences safeguards.
+- Remaining: CI compile/fixture run; real Windows end-to-end owner testing for all functional controls, including live Steam shutdown/relaunch, startup/tray, pending notifications, and updater replacement. Settings writes span separate files/registry and are not transactional. No release created. UI expert to refine controls, messaging and layout after functional validation.
