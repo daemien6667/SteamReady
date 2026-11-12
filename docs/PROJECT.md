@@ -36,3 +36,38 @@ dotnet publish src/SteamReady/SteamReady.csproj -c Release -r win-x64 --self-con
 ```
 
 Known limitations: manifest format unofficial; no guaranteed instant download, no forced shutdown, no background monitoring. Steam can be restarted externally during a write; process checks minimize but cannot eliminate this race. Do not start Steam until the utility finishes. Undo only tracks most recent batch. Journal and recovery behavior require failure-injection testing. Development preview artifact exists; no public v1.0 release yet.
+
+## Approved functionality decisions — 2026-11-12
+
+Status: APPROVED DESIGN only. These decisions are not implementation or public-release authorization. Preserve existing working UI; no UI design work until explicitly authorized.
+
+| # | Decision | Approved direction |
+|---|---|---|
+| 1 | Automatic management scope | User-selectable new games only (default when automatic management is enabled) or continuous enforcement across installed games, subject to individual exceptions. Background operation remains optional. |
+| 2 | Individual exceptions | Respect preferences deliberately changed within Steam; optionally remember those changes as exceptions. |
+| 3 | Uninstall/reinstall | Remember preferences by Steam app ID across uninstall and reinstall. |
+| 4 | Backup retention | Keep the last 50 change batches by default, with an option to retain more. Multi-batch recovery is planned; current build supports only last-batch undo. |
+| 5 | Game profiles | User-defined groups with customizable names and update preferences. |
+| 6 | Portable preferences | Export/import preferences for restoring settings or migrating to another PC. |
+| 7 | SteamReady updates | Notify users when a new version is available; let them choose when to install it. |
+| 8 | Steam integration | Offer a button to launch or reopen Steam after applying changes. |
+| 9 | Startup behaviour | When optional background mode is enabled, offer startup with Windows and optional minimized-to-tray startup. |
+| 10 | Download management | REJECTED. Do not expand into bandwidth limits, download scheduling, or pending-update management. Keep scope focused on game update preferences. |
+
+### Approved apply-changes behaviour (earlier decision, 2026-11-12)
+
+Provide three independent, user-selectable modes:
+1. **Manual confirmation (default):** If Steam is running, tell the user to close it and click Apply again. Preserve the existing behaviour.
+2. **Apply when Steam closes:** Queue changes and automatically apply after Steam exits normally.
+3. **Notify when ready:** Queue changes, detect Steam has closed, notify the user, and require confirmation before applying.
+
+This setting is independent of automatic new-game detection. No automatic writes without explicit opt-in. Never force-close Steam. Recheck that Steam is closed and that the target manifest still matches expected state before writing.
+
+### Other approved design principles
+- Optional background operation, not mandatory; manual use remains available.
+- New-game detection and configurable default preference, with optional notifications.
+- Preserve the simple one-click bulk update workflow.
+- UI design remains explicitly deferred for a separate expert-led design phase.
+
+### Open planning
+The owner will answer further questions separately. Do not initiate implementation, UI changes, or additional feature decisions at this checkpoint.
