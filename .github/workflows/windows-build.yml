@@ -1,0 +1,36 @@
+name: Windows build and fixture tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Compile Windows application
+        run: dotnet build src/SteamReady/SteamReady.csproj -c Release
+      - name: Run isolated fixture checks
+        run: dotnet run --project tests/SteamReady.Tests/SteamReady.Tests.csproj -c Release
+      - name: Publish portable Windows x64 preview
+        run: dotnet publish src/SteamReady/SteamReady.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o publish
+      - name: Generate SHA-256
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash publish/SteamReady.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  SteamReady.exe" | Set-Content publish/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SteamReady-win-x64-preview
+          path: |
+            publish/SteamReady.exe
+            publish/SHA256SUMS.txt
+          if-no-files-found: error
