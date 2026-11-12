@@ -70,4 +70,12 @@ This setting is independent of automatic new-game detection. No automatic writes
 - UI design remains explicitly deferred for a separate expert-led design phase.
 
 ### Open planning
-The owner will answer further questions separately. Do not initiate implementation, UI changes, or additional feature decisions at this checkpoint.
+Owner authorized development to proceed after completing the functionality discussion. UI design remains on hold; implement approved functionality incrementally without redesigning the interface or publishing a public release.
+
+
+## Checkpoint 0.2 — history engine (implementation, CI pending)
+- Added `ChangeHistory` backend with durable pre-write intents, byte-exact backups, per-entry results and timestamps, configurable retention (default 50 completed batches; pending and legacy records are preserved), whole-batch and selected-app restoration, and restoration as a new batch.
+- Existing Apply and Undo last batch actions now use the new backend. Existing layout and appearance are unchanged. The history browser, selection and retention controls are deferred to the separate UI phase; the backend APIs are available for integration.
+- Older preview undo journal remains readable; old raw backups are never pruned by the new engine. Restoration checks current scanned path/app identity and expected preference; conflicting or moved/unavailable apps are skipped with errors.
+- Added isolated write tests, backup/BOM verification, selective restore, preservation of unrelated changes, undo of restoration, stale/conflicting modes, partial failures, simulated Steam restart, and retention.
+- Remaining: verify CI and owner regression test; test crash/power-loss recovery and access-denied handling; build saved preferences/groups/profiles, import/export, automatic monitoring/queue and startup, graceful Steam shutdown/relaunch with explicit consent, and update notification. No public release or UI design authorized.

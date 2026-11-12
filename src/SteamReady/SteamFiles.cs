@@ -63,8 +63,8 @@ internal static class SteamFiles
 {
     private static readonly UTF8Encoding Utf8 = new(false, true);
     private static readonly string Data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamReady");
-    private static string Journal => Path.Combine(Data, "last-batch.json");
-    public static bool HasUndo => File.Exists(Journal);
+    private static ChangeHistory History => new(Data, SteamRunning);
+    public static bool HasUndo => History.HasUndo;
     public static bool SteamRunning()
     {
         var processes = Process.GetProcessesByName("steam");
@@ -90,13 +90,13 @@ internal static class SteamFiles
         return candidates.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => Path.GetFullPath(p!))
             .FirstOrDefault(p => File.Exists(Path.Combine(p, "steam.exe")) && Directory.Exists(Path.Combine(p, "steamapps")));
     }
-    private static (byte[] Bytes, string Text, bool Bom) Load(string path)
+    internal static (byte[] Bytes, string Text, bool Bom) Load(string path)
     {
         var bytes = File.ReadAllBytes(path);
         bool bom = bytes.AsSpan().StartsWith(new byte[] { 0xef, 0xbb, 0xbf });
         return (bytes, Utf8.GetString(bytes, bom ? 3 : 0, bytes.Length - (bom ? 3 : 0)), bom);
     }
-    private static byte[] Encode(string text, bool bom)
+    internal static byte[] Encode(string text, bool bom)
     {
         var bytes = Utf8.GetBytes(text);
         return bom ? new byte[] { 0xef, 0xbb, 0xbf }.Concat(bytes).ToArray() : bytes;
@@ -163,83 +163,19 @@ internal static class SteamFiles
         }
         return new(root, libraries.ToList(), games.OrderBy(g => g.Name, StringComparer.OrdinalIgnoreCase).ToList(), warnings);
     }
-    private static void AtomicReplace(string path, byte[] expected, byte[] next)
+    internal static void AtomicReplace(string path, byte[] expected, byte[] next, Action requireClosed)
     {
         string temp = path + ".steamready-" + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
             File.WriteAllBytes(temp, next);
-            RequireClosed();
+            requireClosed();
             if (!File.ReadAllBytes(path).AsSpan().SequenceEqual(expected)) throw new IOException("File changed during operation; rescan.");
             File.Replace(temp, path, null);
             if (!File.ReadAllBytes(path).AsSpan().SequenceEqual(next)) throw new IOException("Verification failed after replacement.");
         }
         finally { if (File.Exists(temp)) File.Delete(temp); }
     }
-    private static void SaveJournal(Batch batch)
-    {
-        Directory.CreateDirectory(Data);
-        string tmp = Journal + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            File.WriteAllText(tmp, JsonSerializer.Serialize(batch), Utf8);
-            File.Move(tmp, Journal, true);
-        }
-        finally { if (File.Exists(tmp)) File.Delete(tmp); }
-    }
-    public static ChangeResult Apply(IEnumerable<Game> selected, string desired)
-    {
-        RequireClosed();
-        var errors = new List<string>();
-        var entries = new List<BackupEntry>();
-        var batch = new Batch(entries);
-        var dir = Path.Combine(Data, "backups", DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N"));
-        int changed = 0;
-        foreach (var game in selected.Where(g => g.Mode != desired))
-        {
-            try
-            {
-                RequireClosed();
-                var original = Load(game.Path);
-                var next = EditPreference(original.Text, game.Id, game.Mode, desired);
-                Directory.CreateDirectory(dir);
-                string backup = Path.Combine(dir, Guid.NewGuid().ToString("N") + "-" + Path.GetFileName(game.Path));
-                File.WriteAllBytes(backup, original.Bytes);
-                entries.Add(new(game.Path, game.Id, game.Mode, desired, backup));
-                SaveJournal(batch);
-                AtomicReplace(game.Path, original.Bytes, Encode(next, original.Bom));
-                changed++;
-            }
-            catch (Exception ex) { errors.Add(game.Name + ": " + ex.Message); }
-        }
-        return new(changed, errors);
-    }
-    public static ChangeResult Undo(ScanResult scan)
-    {
-        RequireClosed();
-        var batch = JsonSerializer.Deserialize<Batch>(File.ReadAllText(Journal)) ?? throw new FormatException("Invalid undo journal");
-        var errors = new List<string>();
-        var remaining = new List<BackupEntry>();
-        int changed = 0;
-        var allowed = scan.Games.GroupBy(g => g.Path, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in batch.Entries)
-        {
-            try
-            {
-                RequireClosed();
-                if (!allowed.TryGetValue(entry.Path, out var game) || game.Id != entry.Id)
-                    throw new IOException("App no longer in scanned libraries.");
-                var original = Load(game.Path);
-                var m = Manifest(original.Text);
-                if (m.Mode.Value == entry.Before) continue;
-                var next = EditPreference(original.Text, entry.Id, entry.After, entry.Before);
-                AtomicReplace(game.Path, original.Bytes, Encode(next, original.Bom));
-                changed++;
-            }
-            catch (Exception ex) { remaining.Add(entry); errors.Add(entry.Path + ": " + ex.Message); }
-        }
-        if (remaining.Count == 0) File.Delete(Journal);
-        else SaveJournal(new(remaining));
-        return new(changed, errors);
-    }
+    public static ChangeResult Apply(IEnumerable<Game> selected, string desired) => History.Apply(selected, desired);
+    public static ChangeResult Undo(ScanResult scan) => History.UndoLatest(scan);
 }

@@ -60,6 +60,67 @@ try
     File.WriteAllText(folders, "malformed");
     var partial = SteamFiles.Scan(main);
     Check(partial.Games.Count == 1 && partial.Warnings.Count > 0, "Malformed library list reports partial scan");
+    // All write tests use the isolated fixture and a fake Steam process check.
+    string data = Path.Combine(root, "history-data");
+    bool running = false;
+    var history = new ChangeHistory(data, () => running);
+    File.WriteAllText(folders, "\"libraryfolders\" { \"0\" { \"path\" \"" + Esc(main) + "\" } \"1\" { \"path\" \"" + Esc(other) + "\" } }");
+    var fixture = SteamFiles.Scan(main);
+    var firstGame = fixture.Games.Single(g => g.Id == "123");
+    Check(history.Retention == 50, "Default history retention is 50");
+    Reject<ArgumentOutOfRangeException>(() => history.SetRetention(49), "Reject retention below 50");
+    history.SetRetention(51);
+    Check(new ChangeHistory(data, () => false).Retention == 51, "Retention survives restart");
+    running = true;
+    Reject<InvalidOperationException>(() => history.Apply([firstGame], "2"), "No writes while Steam running");
+    running = false;
+    Check(history.List().Count == 0 && File.ReadAllText(app) == original, "Running Steam rejection leaves no history or manifest change");
+    var result = history.Apply([firstGame], "2");
+    Check(result.Changed == 1 && result.Errors.Count == 0, "Actual fixture write succeeds");
+    var batch = history.List().Single();
+    Check(batch.Entries.Single().State == "applied", "Successful write journaled");
+    Check(File.ReadAllBytes(batch.Entries.Single().Backup).SequenceEqual(new UTF8Encoding(true).GetPreamble().Concat(Encoding.UTF8.GetBytes(original))), "Original backup is byte exact");
+    Check(File.ReadAllText(app) == edited && File.ReadAllBytes(app).Take(3).SequenceEqual(new byte[] { 0xef, 0xbb, 0xbf }), "Actual write preserves BOM and unrelated content");
+    Check(history.Apply([firstGame], "1").Errors.Count == 1 && File.ReadAllText(app) == edited, "Stale scanned preference rejected");
+    // Simulate Steam changing unrelated manifest data after the first operation.
+    File.WriteAllText(app, edited.Replace("keep me", "new Steam data"), new UTF8Encoding(true));
+    var current = SteamFiles.Scan(main);
+    Check(history.Restore(current, batch.Id, new HashSet<string> { "456" }).Changed == 0, "Nonselected game not restored");
+    Check(history.Restore(current, batch.Id, new HashSet<string> { "123" }).Changed == 1, "Selective historical restore");
+    Check(File.ReadAllText(app) == original.Replace("keep me", "new Steam data"), "Restore preserves newer Steam data");
+    var restored = history.List().First();
+    Check(restored.Kind == "restore" && restored.SourceBatchId == batch.Id && restored.Entries.Single().Before == "2", "Restoration creates its own history entry");
+    Check(history.UndoLatest(SteamFiles.Scan(main)).Changed == 1, "Undo a restoration");
+    Check(SteamFiles.Scan(main).Games.Single(g => g.Id == "123").Mode == "2", "Undo restoration returns to immediate");
+    // Deliberate conflicting manual change must never be overwritten by old history.
+    File.WriteAllText(app, Manifest(mode: "1"), new UTF8Encoding(true));
+    var conflict = history.Restore(SteamFiles.Scan(main), batch.Id, null);
+    Check(conflict.Changed == 0 && conflict.Errors.Count == 1 && File.ReadAllText(app) == Manifest(mode: "1"), "Historical restore rejects conflict");
+    // A partial batch must not lose the successful entry.
+    var good = SteamFiles.Scan(main).Games.Single(g => g.Id == "123");
+    var bad = SteamFiles.Scan(main).Games.Single(g => g.Id == "456");
+    File.Delete(bad.Path);
+    var partialWrite = history.Apply([good, bad], "0");
+    Check(partialWrite.Changed == 1 && partialWrite.Errors.Count == 1, "Partial batch reports successful and failed app");
+    Check(history.List().First().Entries.Any(e => e.Id == "123" && e.State == "applied"), "Partial success remains recoverable");
+    // Inject Steam starting between the durable intent and the final file replacement.
+    int calls = 0;
+    var race = new ChangeHistory(Path.Combine(root, "race-data"), () => ++calls >= 3);
+    var beforeRace = SteamFiles.Scan(main).Games.Single(g => g.Id == "123");
+    var raceResult = race.Apply([beforeRace], "2");
+    Check(raceResult.Changed == 0 && raceResult.Errors.Count > 0 && SteamFiles.Scan(main).Games.Single(g => g.Id == "123").Mode == "0", "Steam restart before replace prevents write");
+    Check(race.List().Single().Entries.Single().State == "failed", "Unchanged failed write recorded");
+    // Retention operates on owned history directories only.
+    var retained = new ChangeHistory(Path.Combine(root, "retention-data"), () => false);
+    for (int n = 0; n < 52; n++)
+    {
+        var g = SteamFiles.Scan(main).Games.Single(g => g.Id == "123");
+        var outcome = retained.Apply([g], g.Mode == "0" ? "2" : "0");
+        if (outcome.Changed != 1 || outcome.Errors.Count != 0) throw new Exception("Retention fixture write failed");
+    }
+    Check(retained.List().Count == 50, "Oldest completed batches pruned to 50");
+    Check(Directory.GetDirectories(Path.Combine(root, "retention-data", "history")).Length == 50, "Pruning removes owned backup directories");
+
 }
 finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
 Console.WriteLine($"All {passed} fixture checks passed. No real Steam libraries accessed.");

@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../src/SteamReady/SteamFiles.cs" Link="SteamFiles.cs" />
+    <Compile Include="../../src/SteamReady/ChangeHistory.cs" Link="ChangeHistory.cs" />
   </ItemGroup>
 </Project>
